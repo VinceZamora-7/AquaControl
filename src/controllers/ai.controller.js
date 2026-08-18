@@ -1,10 +1,15 @@
-const pool = require('../config/database');
+const pool =
+  require('../config/database');
 
 const {
   analyzeWaterQuality,
-} = require('../services/gemini.service');
+} =
+  require('../services/gemini.service');
 
-async function analyzeLatestReading(req, res) {
+async function analyzeLatestReading(
+  req,
+  res
+) {
   try {
     const {
       device_id,
@@ -13,72 +18,93 @@ async function analyzeLatestReading(req, res) {
 
     if (!device_id) {
       return res.status(400).json({
-        message: 'device_id is required.',
+        message:
+          'device_id is required.',
       });
     }
 
-    const [rows] = await pool.execute(
-      `
-      SELECT
-        d.device_code,
-        sr.ph,
-        sr.tds,
-        sr.turbidity,
-        sr.temperature,
-        sr.water_status,
-        sr.created_at
-      FROM sensor_readings sr
-      INNER JOIN devices d
-        ON d.id = sr.device_id
-      WHERE d.device_code = ?
-      ORDER BY sr.created_at DESC
-      LIMIT 1
-      `,
-      [device_id]
-    );
+    const [rows] =
+      await pool.execute(
+        `
+        SELECT
+          d.device_code,
+          sr.ph,
+          sr.tds,
+          sr.turbidity,
+          sr.temperature,
+          sr.water_status,
+          sr.created_at
+
+        FROM sensor_readings sr
+
+        INNER JOIN devices d
+          ON d.id = sr.device_id
+
+        WHERE d.device_code = ?
+
+        ORDER BY sr.created_at DESC
+
+        LIMIT 1
+        `,
+        [device_id]
+      );
 
     if (rows.length === 0) {
       return res.status(404).json({
-        message: 'No sensor readings found for this device.',
+        message:
+          'No sensor readings found for this device.',
       });
     }
 
     const reading = rows[0];
 
-    const analysis = await analyzeWaterQuality({
-      deviceId: reading.device_code,
+    const analysis =
+      await analyzeWaterQuality({
+        deviceId:
+          reading.device_code,
 
-      ph: Number(reading.ph),
+        ph:
+          Number(reading.ph),
 
-      tds: Number(reading.tds),
+        tds:
+          Number(reading.tds),
 
-      turbidity: Number(
-        reading.turbidity
-      ),
+        turbidity:
+          Number(
+            reading.turbidity
+          ),
 
-      temperature: Number(
-        reading.temperature
-      ),
+        temperature:
+          Number(
+            reading.temperature
+          ),
 
-      status: reading.water_status,
+        status:
+          reading.water_status,
 
-      question,
-    });
+        question,
+      });
 
     return res.json({
-      deviceId: reading.device_code,
+      deviceId:
+        reading.device_code,
 
       reading: {
-        ph: Number(reading.ph),
-        tds: Number(reading.tds),
+        ph:
+          Number(reading.ph),
 
-        ntu: Number(
-          reading.turbidity
-        ),
+        tds:
+          Number(reading.tds),
 
-        temp: Number(
-          reading.temperature
-        ),
+        ntu:
+          Number(
+            reading.turbidity
+          ),
+
+        temp:
+          Number(
+            reading.temperature
+          ),
 
         status:
           reading.water_status,
