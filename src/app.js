@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 
 const sensorRoutes = require('./routes/sensor.routes');
+const aiRoutes = require('./routes/ai.routes');
 
 const app = express();
 
@@ -28,6 +29,11 @@ app.get('/health', (req, res) => {
 app.use(
   '/api/v1',
   sensorRoutes
+);
+
+app.use(
+  '/api/v1/ai',
+  aiRoutes
 );
 
 app.use((req, res) => {
