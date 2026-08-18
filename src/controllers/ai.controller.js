@@ -11,10 +11,7 @@ async function analyzeLatestReading(
   res
 ) {
   try {
-    const {
-      device_id,
-      question,
-    } = req.body;
+    const { device_id } = req.body;
 
     if (!device_id) {
       return res.status(400).json({
@@ -81,8 +78,6 @@ async function analyzeLatestReading(
 
         status:
           reading.water_status,
-
-        question,
       });
 
     return res.json({
@@ -123,7 +118,7 @@ async function analyzeLatestReading(
 
     return res.status(500).json({
       message:
-        'Unable to analyze water quality at this time.',
+        'Unable to analyze water usage safety.',
     });
   }
 }

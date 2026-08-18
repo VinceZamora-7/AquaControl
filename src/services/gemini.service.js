@@ -4,88 +4,70 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const waterAnalysisSchema = {
+const usageSchema = {
   type: Type.OBJECT,
 
   properties: {
-    summary: {
-      type: Type.STRING,
-      description:
-        'Short plain-language summary of the current water condition.',
-    },
-
     overall_status: {
       type: Type.STRING,
       enum: [
-        'GOOD',
-        'ATTENTION',
-        'WARNING',
-        'UNKNOWN',
+        'SUITABLE',
+        'CAUTION',
+        'NOT_RECOMMENDED',
+        'INSUFFICIENT_DATA',
       ],
     },
 
-    observations: {
+    summary: {
+      type: Type.STRING,
+      description:
+        'A short descriptive summary of the current water usage safety based only on available sensor readings.',
+    },
+
+    usage_summary: {
       type: Type.ARRAY,
 
       items: {
         type: Type.OBJECT,
 
         properties: {
-          parameter: {
-            type: Type.STRING,
-          },
-
-          value: {
+          title: {
             type: Type.STRING,
           },
 
           status: {
             type: Type.STRING,
             enum: [
-              'NORMAL',
-              'ATTENTION',
-              'WARNING',
-              'UNKNOWN',
+              'SUITABLE',
+              'CAUTION',
+              'NOT_RECOMMENDED',
+              'INSUFFICIENT_DATA',
             ],
           },
 
-          message: {
+          description: {
             type: Type.STRING,
           },
         },
 
         required: [
-          'parameter',
-          'value',
+          'title',
           'status',
-          'message',
+          'description',
         ],
       },
     },
 
-    recommendations: {
-      type: Type.ARRAY,
-
-      items: {
-        type: Type.STRING,
-      },
-    },
-
-    warnings: {
-      type: Type.ARRAY,
-
-      items: {
-        type: Type.STRING,
-      },
+    recommendation: {
+      type: Type.STRING,
     },
   },
 
   required: [
-    'summary',
     'overall_status',
-    'observations',
-    'recommendations',
-    'warnings',
+    'summary',
+    'usage_summary',
+    'recommendation',
   ],
 };
 
@@ -96,64 +78,67 @@ async function analyzeWaterQuality({
   turbidity,
   temperature,
   status,
-  question,
 }) {
   const prompt = `
-You are AquaControl AI, an assistant for a water quality monitoring system.
+You are AquaControl AI.
 
-Current device:
+Your job is to assess how the water may currently be used based only on the available sensor readings.
+
+Device:
 ${deviceId}
 
-Measured readings:
+Current readings:
 - pH: ${ph}
 - TDS: ${tds} ppm
 - Turbidity: ${turbidity} NTU
 - Temperature: ${temperature} °C
 - AquaControl turbidity classification: ${status}
 
-AquaControl configured turbidity thresholds:
-- 0 to 199 NTU: CLEAR
-- 200 to 299 NTU: CLOUDY
-- 300 NTU and above: DIRTY
+AquaControl configured turbidity classification:
+- 0 to 199 NTU = CLEAR
+- 200 to 299 NTU = CLOUDY
+- 300 NTU and above = DIRTY
 
-User request:
-${question || 'Analyze the current water condition.'}
+Assess these four usage categories only:
 
-Rules:
+1. Human Consumption
+2. Animals
+3. Irrigation
+4. General Cleaning
 
-1. Respect AquaControl's configured classifications.
-2. Do not redefine CLEAR, CLOUDY, or DIRTY using external thresholds.
-3. You may explain that external standards can differ, but do not present
-   those standards as AquaControl's configured rules.
-4. Never claim water is safe to drink based only on these sensors.
-5. Do not invent sensor readings.
-6. Mention calibration if values appear unusual or inconsistent.
-7. Focus only on:
-   - water quality
-   - sensor readings
-   - sensor calibration
-   - monitoring
-   - filtration
-   - maintenance
-8. Keep responses concise and suitable for a mobile application.
-9. Do not use Markdown formatting.
-10. Return only information matching the provided JSON structure.
+Allowed statuses:
+- SUITABLE
+- CAUTION
+- NOT_RECOMMENDED
+- INSUFFICIENT_DATA
+
+Important rules:
+
+- Base the assessment only on the sensor readings provided.
+- Never claim drinking water is confirmed safe from pH, TDS, turbidity, and temperature alone.
+- For human consumption, use NOT_RECOMMENDED or INSUFFICIENT_DATA when biological or chemical safety cannot be confirmed.
+- Do not invent contaminants or sensor measurements.
+- Respect AquaControl's configured turbidity classification.
+- Keep each usage description short and descriptive.
+- The main summary should be 2 to 3 short sentences.
+- The recommendation should be 1 to 2 sentences.
+- Do not use Markdown.
+- Do not produce a medical or laboratory certification.
+- Return exactly four usage_summary items.
 `;
 
-  const response =
-    await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-flash-lite-preview',
 
-      contents: prompt,
+    contents: prompt,
 
-      config: {
-        responseMimeType:
-          'application/json',
-
-        responseSchema:
-          waterAnalysisSchema,
-      },
-    });
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: usageSchema,
+      temperature: 0.2,
+      maxOutputTokens: 700,
+    },
+  });
 
   if (!response.text) {
     throw new Error(
@@ -161,18 +146,7 @@ Rules:
     );
   }
 
-  try {
-    return JSON.parse(response.text);
-  } catch (error) {
-    console.error(
-      'Gemini JSON parse error:',
-      response.text
-    );
-
-    throw new Error(
-      'Gemini returned invalid JSON.'
-    );
-  }
+  return JSON.parse(response.text);
 }
 
 module.exports = {
