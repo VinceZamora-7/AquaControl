@@ -1,7 +1,16 @@
 const pool = require('../config/database');
+
 const {
   emitSensorReading,
 } = require('../services/socket.service');
+
+const {
+  evaluateWaterAlert,
+} = require('../services/alert.service');
+
+// ============================================================
+// SUBMIT SENSOR READING
+// ============================================================
 
 async function submitReading(req, res) {
   try {
@@ -14,21 +23,32 @@ async function submitReading(req, res) {
       status,
     } = req.body;
 
+    // --------------------------------------------------------
+    // VALIDATION
+    // --------------------------------------------------------
+
     if (!device_id) {
       return res.status(400).json({
         message: 'device_id is required.',
       });
     }
 
-    const [devices] = await pool.execute(
-      `
-      SELECT id, device_code
-      FROM devices
-      WHERE device_code = ?
-      LIMIT 1
-      `,
-      [device_id]
-    );
+    // --------------------------------------------------------
+    // CHECK DEVICE
+    // --------------------------------------------------------
+
+    const [devices] =
+      await pool.execute(
+        `
+        SELECT
+          id,
+          device_code
+        FROM devices
+        WHERE device_code = ?
+        LIMIT 1
+        `,
+        [device_id]
+      );
 
     if (devices.length === 0) {
       return res.status(404).json({
@@ -36,29 +56,81 @@ async function submitReading(req, res) {
       });
     }
 
-    const device = devices[0];
+    const device =
+      devices[0];
 
-    const [result] = await pool.execute(
-      `
-      INSERT INTO sensor_readings (
-        device_id,
-        ph,
-        tds,
-        turbidity,
-        temperature,
-        water_status
-      )
-      VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [
-        device.id,
-        ph ?? null,
-        tds ?? null,
-        turbidity ?? null,
-        temperature ?? null,
-        status ?? null,
-      ]
-    );
+    // --------------------------------------------------------
+    // NORMALIZE SENSOR VALUES
+    // --------------------------------------------------------
+
+    const normalizedPh =
+      ph !== null &&
+      ph !== undefined
+        ? Number(ph)
+        : null;
+
+    const normalizedTds =
+      tds !== null &&
+      tds !== undefined
+        ? Number(tds)
+        : null;
+
+    const normalizedTurbidity =
+      turbidity !== null &&
+      turbidity !== undefined
+        ? Number(turbidity)
+        : null;
+
+    const normalizedTemperature =
+      temperature !== null &&
+      temperature !== undefined
+        ? Number(temperature)
+        : null;
+
+    // --------------------------------------------------------
+    // EVALUATE AQUACONTROL ALERT
+    // --------------------------------------------------------
+
+    const alarm =
+      evaluateWaterAlert({
+        ph: normalizedPh,
+        tds: normalizedTds,
+        turbidity:
+          normalizedTurbidity,
+        temperature:
+          normalizedTemperature,
+      });
+
+    // --------------------------------------------------------
+    // SAVE SENSOR READING
+    // --------------------------------------------------------
+
+    const [result] =
+      await pool.execute(
+        `
+        INSERT INTO sensor_readings (
+          device_id,
+          ph,
+          tds,
+          turbidity,
+          temperature,
+          water_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          device.id,
+          normalizedPh,
+          normalizedTds,
+          normalizedTurbidity,
+          normalizedTemperature,
+          status ?? null,
+        ]
+      );
+
+    // --------------------------------------------------------
+    // UPDATE DEVICE STATUS
+    // --------------------------------------------------------
 
     await pool.execute(
       `
@@ -71,149 +143,349 @@ async function submitReading(req, res) {
       [device.id]
     );
 
+    // --------------------------------------------------------
+    // NORMALIZED READING
+    // --------------------------------------------------------
+
     const reading = {
-      id: result.insertId,
-      deviceId: device.device_code,
-      ph,
-      tds,
-      ntu: turbidity,
-      temp: temperature,
-      status,
-      timestamp: new Date().toISOString(),
+      id:
+        result.insertId,
+
+      deviceId:
+        device.device_code,
+
+      ph:
+        normalizedPh,
+
+      tds:
+        normalizedTds,
+
+      ntu:
+        normalizedTurbidity,
+
+      temp:
+        normalizedTemperature,
+
+      status:
+        status ?? null,
+
+      alarm,
+
+      timestamp:
+        new Date().toISOString(),
     };
+
+    // --------------------------------------------------------
+    // SOCKET.IO LIVE UPDATE
+    // --------------------------------------------------------
 
     emitSensorReading(
       device.device_code,
       reading
     );
 
-    return res.status(201).json({
-      message: 'Sensor reading received.',
-      data: reading,
-    });
+    // --------------------------------------------------------
+    // RESPONSE TO ESP32
+    // --------------------------------------------------------
+
+    return res
+      .status(201)
+      .json({
+        message:
+          'Sensor reading received.',
+
+        data:
+          reading,
+
+        alarm,
+      });
+
   } catch (error) {
-    console.error('submitReading error:', error);
+    console.error(
+      'submitReading error:',
+      error
+    );
 
     return res.status(500).json({
-      message: 'Internal server error.',
+      message:
+        'Internal server error.',
     });
   }
 }
 
-async function getLatestReading(req, res) {
+// ============================================================
+// GET LATEST READING
+// ============================================================
+
+async function getLatestReading(
+  req,
+  res
+) {
   try {
-    const { deviceId } = req.params;
+    const {
+      deviceId,
+    } = req.params;
 
-    const [rows] = await pool.execute(
-      `
-      SELECT
-        sr.id,
-        d.device_code,
-        sr.ph,
-        sr.tds,
-        sr.turbidity,
-        sr.temperature,
-        sr.water_status,
-        sr.created_at
-      FROM sensor_readings sr
-      INNER JOIN devices d
-        ON d.id = sr.device_id
-      WHERE d.device_code = ?
-      ORDER BY sr.created_at DESC
-      LIMIT 1
-      `,
-      [deviceId]
-    );
+    const [rows] =
+      await pool.execute(
+        `
+        SELECT
+          sr.id,
+          d.device_code,
+          sr.ph,
+          sr.tds,
+          sr.turbidity,
+          sr.temperature,
+          sr.water_status,
+          sr.created_at
+        FROM sensor_readings sr
+        INNER JOIN devices d
+          ON d.id = sr.device_id
+        WHERE d.device_code = ?
+        ORDER BY sr.created_at DESC
+        LIMIT 1
+        `,
+        [deviceId]
+      );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        message: 'No sensor reading found.',
-      });
+    if (
+      rows.length === 0
+    ) {
+      return res
+        .status(404)
+        .json({
+          message:
+            'No sensor reading found.',
+        });
     }
 
-    const row = rows[0];
+    const row =
+      rows[0];
+
+    const ph =
+      row.ph !== null
+        ? Number(row.ph)
+        : null;
+
+    const tds =
+      row.tds !== null
+        ? Number(row.tds)
+        : null;
+
+    const ntu =
+      row.turbidity !== null
+        ? Number(
+            row.turbidity
+          )
+        : null;
+
+    const temp =
+      row.temperature !== null
+        ? Number(
+            row.temperature
+          )
+        : null;
+
+    // Recalculate the current alert state
+    const alarm =
+      evaluateWaterAlert({
+        ph,
+        tds,
+        turbidity: ntu,
+        temperature: temp,
+      });
 
     return res.json({
-      ph: Number(row.ph),
-      tds: Number(row.tds),
-      ntu: Number(row.turbidity),
-      temp: Number(row.temperature),
-      status: row.water_status,
-      deviceId: row.device_code,
-      timestamp: row.created_at,
+      id:
+        row.id,
+
+      ph,
+
+      tds,
+
+      ntu,
+
+      temp,
+
+      status:
+        row.water_status,
+
+      deviceId:
+        row.device_code,
+
+      alarm,
+
+      timestamp:
+        row.created_at,
     });
+
   } catch (error) {
     console.error(
       'getLatestReading error:',
       error
     );
 
-    return res.status(500).json({
-      message: 'Internal server error.',
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          'Internal server error.',
+      });
   }
 }
 
-async function getReadingHistory(req, res) {
+// ============================================================
+// GET READING HISTORY
+// ============================================================
+
+async function getReadingHistory(
+  req,
+  res
+) {
   try {
-    const { deviceId } = req.params;
+    const {
+      deviceId,
+    } = req.params;
 
-    const limit = Math.min(
-      Number(req.query.limit || 100),
-      500
-    );
+    const requestedLimit =
+      Number(
+        req.query.limit ||
+        100
+      );
 
-    const [rows] = await pool.execute(
-      `
-      SELECT
-        sr.id,
-        d.device_code,
-        sr.ph,
-        sr.tds,
-        sr.turbidity,
-        sr.temperature,
-        sr.water_status,
-        sr.created_at
-      FROM sensor_readings sr
-      INNER JOIN devices d
-        ON d.id = sr.device_id
-      WHERE d.device_code = ?
-      ORDER BY sr.created_at DESC
-      LIMIT ?
-      `,
-      [
-        deviceId,
-        limit,
-      ]
-    );
+    const limit =
+      Math.min(
+        Math.max(
+          Number.isFinite(
+            requestedLimit
+          )
+            ? requestedLimit
+            : 100,
+          1
+        ),
+        500
+      );
 
-    const readings = rows.map((row) => ({
-      id: row.id,
-      deviceId: row.device_code,
-      ph: Number(row.ph),
-      tds: Number(row.tds),
-      ntu: Number(row.turbidity),
-      temp: Number(row.temperature),
-      status: row.water_status,
-      timestamp: row.created_at,
-    }));
+    const [rows] =
+      await pool.execute(
+        `
+        SELECT
+          sr.id,
+          d.device_code,
+          sr.ph,
+          sr.tds,
+          sr.turbidity,
+          sr.temperature,
+          sr.water_status,
+          sr.created_at
+        FROM sensor_readings sr
+        INNER JOIN devices d
+          ON d.id = sr.device_id
+        WHERE d.device_code = ?
+        ORDER BY sr.created_at DESC
+        LIMIT ?
+        `,
+        [
+          deviceId,
+          limit,
+        ]
+      );
+
+    const readings =
+      rows.map(
+        (row) => {
+          const ph =
+            row.ph !== null
+              ? Number(
+                  row.ph
+                )
+              : null;
+
+          const tds =
+            row.tds !== null
+              ? Number(
+                  row.tds
+                )
+              : null;
+
+          const ntu =
+            row.turbidity !== null
+              ? Number(
+                  row.turbidity
+                )
+              : null;
+
+          const temp =
+            row.temperature !== null
+              ? Number(
+                  row.temperature
+                )
+              : null;
+
+          const alarm =
+            evaluateWaterAlert({
+              ph,
+              tds,
+              turbidity:
+                ntu,
+              temperature:
+                temp,
+            });
+
+          return {
+            id:
+              row.id,
+
+            deviceId:
+              row.device_code,
+
+            ph,
+
+            tds,
+
+            ntu,
+
+            temp,
+
+            status:
+              row.water_status,
+
+            alarm,
+
+            timestamp:
+              row.created_at,
+          };
+        }
+      );
 
     return res.json({
       deviceId,
-      count: readings.length,
-      data: readings,
+
+      count:
+        readings.length,
+
+      data:
+        readings,
     });
+
   } catch (error) {
     console.error(
       'getReadingHistory error:',
       error
     );
 
-    return res.status(500).json({
-      message: 'Internal server error.',
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          'Internal server error.',
+      });
   }
 }
+
+// ============================================================
+// EXPORTS
+// ============================================================
 
 module.exports = {
   submitReading,
