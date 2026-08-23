@@ -55,7 +55,7 @@ function evaluateWaterAlert({
 
     if (
       value < 6.0 ||
-      value > 9.0
+      value > 12
     ) {
       escalate(
         SEVERITY.CRITICAL,
@@ -65,7 +65,7 @@ function evaluateWaterAlert({
 
     else if (
       value < 6.5 ||
-      value > 8.5
+      value > 9.5
     ) {
       escalate(
         SEVERITY.CAUTION,
