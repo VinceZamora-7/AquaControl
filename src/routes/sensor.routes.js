@@ -1,6 +1,8 @@
-const express = require('express');
+const express =
+  require('express');
 
-const deviceAuth = require('../middleware/deviceAuth');
+const deviceAuth =
+  require('../middleware/deviceAuth');
 
 const {
   submitReading,
@@ -8,7 +10,18 @@ const {
   getReadingHistory,
 } = require('../controllers/sensor.controller');
 
-const router = express.Router();
+const {
+  getThresholds,
+  updateThresholds,
+  restoreDefaultThresholds,
+} = require('../controllers/threshold.controller');
+
+const router =
+  express.Router();
+
+// ==========================================
+// SENSOR READINGS
+// ==========================================
 
 router.post(
   '/readings',
@@ -26,4 +39,24 @@ router.get(
   getReadingHistory
 );
 
-module.exports = router;
+// ==========================================
+// ALERT THRESHOLDS
+// ==========================================
+
+router.get(
+  '/devices/:deviceId/thresholds',
+  getThresholds
+);
+
+router.put(
+  '/devices/:deviceId/thresholds',
+  updateThresholds
+);
+
+router.post(
+  '/devices/:deviceId/thresholds/reset',
+  restoreDefaultThresholds
+);
+
+module.exports =
+  router;

@@ -1,4 +1,5 @@
-const pool = require('../config/database');
+const pool =
+  require('../config/database');
 
 const {
   emitSensorReading,
@@ -8,11 +9,18 @@ const {
   evaluateWaterAlert,
 } = require('../services/alert.service');
 
+const {
+  getThresholdsByDeviceId,
+} = require('../services/threshold.service');
+
 // ============================================================
 // SUBMIT SENSOR READING
 // ============================================================
 
-async function submitReading(req, res) {
+async function submitReading(
+  req,
+  res
+) {
   try {
     const {
       device_id,
@@ -28,9 +36,12 @@ async function submitReading(req, res) {
     // --------------------------------------------------------
 
     if (!device_id) {
-      return res.status(400).json({
-        message: 'device_id is required.',
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            'device_id is required.',
+        });
     }
 
     // --------------------------------------------------------
@@ -50,10 +61,15 @@ async function submitReading(req, res) {
         [device_id]
       );
 
-    if (devices.length === 0) {
-      return res.status(404).json({
-        message: 'Device not registered.',
-      });
+    if (
+      devices.length === 0
+    ) {
+      return res
+        .status(404)
+        .json({
+          message:
+            'Device not registered.',
+        });
     }
 
     const device =
@@ -88,18 +104,34 @@ async function submitReading(req, res) {
         : null;
 
     // --------------------------------------------------------
+    // LOAD CURRENT DEVICE THRESHOLDS
+    // --------------------------------------------------------
+
+    const thresholds =
+      await getThresholdsByDeviceId(
+        device.id
+      );
+
+    // --------------------------------------------------------
     // EVALUATE AQUACONTROL ALERT
     // --------------------------------------------------------
 
     const alarm =
-      evaluateWaterAlert({
-        ph: normalizedPh,
-        tds: normalizedTds,
-        turbidity:
-          normalizedTurbidity,
-        temperature:
-          normalizedTemperature,
-      });
+      evaluateWaterAlert(
+        {
+          ph: normalizedPh,
+
+          tds:
+            normalizedTds,
+
+          turbidity:
+            normalizedTurbidity,
+
+          temperature:
+            normalizedTemperature,
+        },
+        thresholds
+      );
 
     // --------------------------------------------------------
     // SAVE SENSOR READING
@@ -116,14 +148,20 @@ async function submitReading(req, res) {
           temperature,
           water_status
         )
+
         VALUES (?, ?, ?, ?, ?, ?)
         `,
         [
           device.id,
+
           normalizedPh,
+
           normalizedTds,
+
           normalizedTurbidity,
+
           normalizedTemperature,
+
           status ?? null,
         ]
       );
@@ -199,17 +237,18 @@ async function submitReading(req, res) {
 
         alarm,
       });
-
   } catch (error) {
     console.error(
       'submitReading error:',
       error
     );
 
-    return res.status(500).json({
-      message:
-        'Internal server error.',
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          'Internal server error.',
+      });
   }
 }
 
@@ -231,18 +270,29 @@ async function getLatestReading(
         `
         SELECT
           sr.id,
+
+          d.id AS internal_device_id,
+
           d.device_code,
+
           sr.ph,
           sr.tds,
           sr.turbidity,
           sr.temperature,
           sr.water_status,
           sr.created_at
+
         FROM sensor_readings sr
+
         INNER JOIN devices d
-          ON d.id = sr.device_id
+          ON d.id =
+             sr.device_id
+
         WHERE d.device_code = ?
-        ORDER BY sr.created_at DESC
+
+        ORDER BY
+          sr.created_at DESC
+
         LIMIT 1
         `,
         [deviceId]
@@ -280,20 +330,32 @@ async function getLatestReading(
         : null;
 
     const temp =
-      row.temperature !== null
+      row.temperature !==
+      null
         ? Number(
             row.temperature
           )
         : null;
 
-    // Recalculate the current alert state
+    const thresholds =
+      await getThresholdsByDeviceId(
+        row.internal_device_id
+      );
+
     const alarm =
-      evaluateWaterAlert({
-        ph,
-        tds,
-        turbidity: ntu,
-        temperature: temp,
-      });
+      evaluateWaterAlert(
+        {
+          ph,
+          tds,
+
+          turbidity:
+            ntu,
+
+          temperature:
+            temp,
+        },
+        thresholds
+      );
 
     return res.json({
       id:
@@ -318,7 +380,6 @@ async function getLatestReading(
       timestamp:
         row.created_at,
     });
-
   } catch (error) {
     console.error(
       'getLatestReading error:',
@@ -350,7 +411,7 @@ async function getReadingHistory(
     const requestedLimit =
       Number(
         req.query.limit ||
-        100
+          100
       );
 
     const limit =
@@ -361,8 +422,10 @@ async function getReadingHistory(
           )
             ? requestedLimit
             : 100,
+
           1
         ),
+
         500
       );
 
@@ -371,24 +434,53 @@ async function getReadingHistory(
         `
         SELECT
           sr.id,
+
+          d.id AS internal_device_id,
+
           d.device_code,
+
           sr.ph,
           sr.tds,
           sr.turbidity,
           sr.temperature,
           sr.water_status,
           sr.created_at
+
         FROM sensor_readings sr
+
         INNER JOIN devices d
-          ON d.id = sr.device_id
+          ON d.id =
+             sr.device_id
+
         WHERE d.device_code = ?
-        ORDER BY sr.created_at DESC
+
+        ORDER BY
+          sr.created_at DESC
+
         LIMIT ?
         `,
         [
           deviceId,
           limit,
         ]
+      );
+
+    if (
+      rows.length === 0
+    ) {
+      return res.json({
+        deviceId,
+
+        count: 0,
+
+        data: [],
+      });
+    }
+
+    const thresholds =
+      await getThresholdsByDeviceId(
+        rows[0]
+          .internal_device_id
       );
 
     const readings =
@@ -409,28 +501,37 @@ async function getReadingHistory(
               : null;
 
           const ntu =
-            row.turbidity !== null
+            row.turbidity !==
+            null
               ? Number(
                   row.turbidity
                 )
               : null;
 
           const temp =
-            row.temperature !== null
+            row.temperature !==
+            null
               ? Number(
                   row.temperature
                 )
               : null;
 
           const alarm =
-            evaluateWaterAlert({
-              ph,
-              tds,
-              turbidity:
-                ntu,
-              temperature:
-                temp,
-            });
+            evaluateWaterAlert(
+              {
+                ph,
+
+                tds,
+
+                turbidity:
+                  ntu,
+
+                temperature:
+                  temp,
+              },
+
+              thresholds
+            );
 
           return {
             id:
@@ -467,7 +568,6 @@ async function getReadingHistory(
       data:
         readings,
     });
-
   } catch (error) {
     console.error(
       'getReadingHistory error:',
