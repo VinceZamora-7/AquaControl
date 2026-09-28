@@ -73,6 +73,28 @@ const usageSchema = {
       description:
         'One or two concise recommended next actions based on the current measurements and their limitations.',
     },
+
+    testing_recommendation: {
+      type: Type.OBJECT,
+      properties: {
+        laboratory_testing_required: {
+          type: Type.BOOLEAN,
+        },
+        microbial_testing_required: {
+          type: Type.BOOLEAN,
+        },
+        explanation: {
+          type: Type.STRING,
+          description:
+            'A concise explanation of why laboratory and microbial testing is or is not recommended for sensitive uses.',
+        },
+      },
+      required: [
+        'laboratory_testing_required',
+        'microbial_testing_required',
+        'explanation',
+      ],
+    },
   },
 
   required: [
@@ -80,6 +102,7 @@ const usageSchema = {
     'summary',
     'usage_summary',
     'recommendation',
+    'testing_recommendation',
   ],
 };
 
@@ -238,6 +261,24 @@ function validateAnalysisResult(
   ) {
     throw new Error(
       'Gemini returned an invalid recommendation.'
+    );
+  }
+
+  const testing =
+    analysis.testing_recommendation;
+
+  if (
+    !testing ||
+    typeof testing !== 'object' ||
+    typeof testing.laboratory_testing_required !==
+      'boolean' ||
+    typeof testing.microbial_testing_required !==
+      'boolean' ||
+    typeof testing.explanation !== 'string' ||
+    !testing.explanation.trim()
+  ) {
+    throw new Error(
+      'Gemini returned an invalid testing_recommendation.'
     );
   }
 
@@ -447,21 +488,31 @@ RECOMMENDATION
 
 38. Do not claim regulatory certification or compliance.
 
+LABORATORY AND MICROBIAL TESTING
+
+39. Always return a testing_recommendation object.
+
+40. Set microbial_testing_required to true whenever the water may be used for human consumption, because these sensors cannot establish microbiological safety.
+
+41. Set laboratory_testing_required to true for human consumption or whenever unmeasured chemical contaminants could materially affect the proposed use.
+
+42. Explain this limitation plainly without claiming contamination was detected.
+
 OUTPUT RULES
 
-39. Return exactly four usage_summary items.
+43. Return exactly four usage_summary items.
 
-40. The titles must be exactly:
+44. The titles must be exactly:
    - Human Consumption
    - Animals
    - Irrigation
    - General Cleaning
 
-41. Keep them in that exact order.
+45. Keep them in that exact order.
 
-42. Do not use Markdown.
+46. Do not use Markdown.
 
-43. Return only the JSON structure defined by the response schema.
+47. Return only the JSON structure defined by the response schema.
 `;
 
   const response =

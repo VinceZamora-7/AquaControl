@@ -18,8 +18,19 @@ function emitSensorReading(deviceCode, reading) {
     .emit('sensor:reading', reading);
 }
 
+function emitWaterQualityAlert(deviceCode, notification) {
+  if (!ioInstance) {
+    return;
+  }
+
+  ioInstance
+    .to(`device:${deviceCode}`)
+    .emit('water:discrepancy', notification);
+}
+
 module.exports = {
   setIO,
   getIO,
   emitSensorReading,
+  emitWaterQualityAlert,
 };

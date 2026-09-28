@@ -3,7 +3,20 @@ const pool =
 
 const {
   emitSensorReading,
+  emitWaterQualityAlert,
 } = require('../services/socket.service');
+
+const {
+  addReading,
+} = require('../services/reading-stability.service');
+
+const {
+  createDiscrepancyNotification,
+} = require('../services/notification.service');
+
+const {
+  sendDiscrepancyPush,
+} = require('../services/push-notification.service');
 
 const {
   evaluateWaterAlert,
@@ -21,6 +34,9 @@ async function submitReading(
   req,
   res
 ) {
+  const requestStartedAt =
+    process.hrtime.bigint();
+
   try {
     const {
       device_id,
@@ -42,6 +58,45 @@ async function submitReading(
           message:
             'device_id is required.',
         });
+    }
+
+    const suppliedValues = {
+      ph,
+      tds,
+      turbidity,
+      temperature,
+    };
+
+    const invalidSensor = Object.entries(
+      suppliedValues
+    ).find(
+      ([, value]) =>
+        value !== null &&
+        value !== undefined &&
+        value !== '' &&
+        !Number.isFinite(Number(value))
+    );
+
+    if (invalidSensor) {
+      return res.status(400).json({
+        message: `${invalidSensor[0]} must be a valid number.`,
+      });
+    }
+
+    const hasReading = Object.values(
+      suppliedValues
+    ).some(
+      (value) =>
+        value !== null &&
+        value !== undefined &&
+        value !== ''
+    );
+
+    if (!hasReading) {
+      return res.status(400).json({
+        message:
+          'At least one sensor reading is required.',
+      });
     }
 
     // --------------------------------------------------------
@@ -81,27 +136,41 @@ async function submitReading(
 
     const normalizedPh =
       ph !== null &&
-      ph !== undefined
+      ph !== undefined &&
+      ph !== ''
         ? Number(ph)
         : null;
 
     const normalizedTds =
       tds !== null &&
-      tds !== undefined
+      tds !== undefined &&
+      tds !== ''
         ? Number(tds)
         : null;
 
     const normalizedTurbidity =
       turbidity !== null &&
-      turbidity !== undefined
+      turbidity !== undefined &&
+      turbidity !== ''
         ? Number(turbidity)
         : null;
 
     const normalizedTemperature =
       temperature !== null &&
-      temperature !== undefined
+      temperature !== undefined &&
+      temperature !== ''
         ? Number(temperature)
         : null;
+
+    if (
+      normalizedTurbidity !== null &&
+      normalizedTurbidity < 0
+    ) {
+      return res.status(400).json({
+        message:
+          'turbidity cannot be negative.',
+      });
+    }
 
     // --------------------------------------------------------
     // LOAD CURRENT DEVICE THRESHOLDS
@@ -185,6 +254,19 @@ async function submitReading(
     // NORMALIZED READING
     // --------------------------------------------------------
 
+    const timestamp =
+      new Date().toISOString();
+
+    const stability = addReading(
+      device.device_code,
+      {
+        ph: normalizedPh,
+        tds: normalizedTds,
+        turbidity: normalizedTurbidity,
+        temperature: normalizedTemperature,
+      }
+    );
+
     const reading = {
       id:
         result.insertId,
@@ -209,8 +291,20 @@ async function submitReading(
 
       alarm,
 
+      stability: {
+        ...stability,
+        values: {
+          ph: stability.values.ph,
+          tds: stability.values.tds,
+          ntu:
+            stability.values.turbidity,
+          temp:
+            stability.values.temperature,
+        },
+      },
+
       timestamp:
-        new Date().toISOString(),
+        timestamp,
     };
 
     // --------------------------------------------------------
@@ -221,6 +315,30 @@ async function submitReading(
       device.device_code,
       reading
     );
+
+    const notification =
+      createDiscrepancyNotification(
+        device.device_code,
+        result.insertId,
+        alarm,
+        timestamp
+      );
+
+    if (notification) {
+      emitWaterQualityAlert(
+        device.device_code,
+        notification
+      );
+
+      sendDiscrepancyPush(notification).catch(
+        (pushError) => {
+          console.error(
+            'Push notification delivery error:',
+            pushError
+          );
+        }
+      );
+    }
 
     // --------------------------------------------------------
     // RESPONSE TO ESP32
@@ -236,6 +354,18 @@ async function submitReading(
           reading,
 
         alarm,
+
+        notification,
+
+        responseTimeMs:
+          Math.round(
+            (Number(
+              process.hrtime.bigint() -
+                requestStartedAt
+            ) /
+              1e6) *
+              100
+          ) / 100,
       });
   } catch (error) {
     console.error(

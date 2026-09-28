@@ -16,6 +16,11 @@ const {
   restoreDefaultThresholds,
 } = require('../controllers/threshold.controller');
 
+const {
+  registerPushToken,
+  unregisterPushToken,
+} = require('../controllers/push-token.controller');
+
 const router =
   express.Router();
 
@@ -32,6 +37,20 @@ router.post(
 router.get(
   '/devices/:deviceId/latest',
   getLatestReading
+);
+
+// ==========================================
+// PUSH NOTIFICATIONS
+// ==========================================
+
+router.post(
+  '/devices/:deviceId/push-tokens',
+  registerPushToken
+);
+
+router.post(
+  '/devices/:deviceId/push-tokens/unregister',
+  unregisterPushToken
 );
 
 router.get(
